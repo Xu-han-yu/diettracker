@@ -1,4 +1,4 @@
-name: Build Unsigned IPA
+name: .github/workflows/Build Unsigned IPA
 
 # 在 GitHub 的 macOS runner 上构建未签名 .ipa，产物通过 Artifacts 下载，
 # 再用 SideStore / LiveContainer 侧载到 iPhone。Windows 本机不需要任何操作。
