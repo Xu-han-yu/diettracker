@@ -1,0 +1,178 @@
+name: Build Unsigned IPA
+
+# 在 GitHub 的 macOS runner 上构建未签名 .ipa，产物通过 Artifacts 下载，
+# 再用 SideStore / LiveContainer 侧载到 iPhone。Windows 本机不需要任何操作。
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner image (macos-15 = Xcode 16.x, macos-26 = Xcode 26.x)"
+        required: false
+        default: "macos-15"
+      configuration:
+        description: "Build configuration"
+        required: false
+        default: "Release"
+      bundle_id:
+        description: "Bundle identifier override"
+        required: false
+        default: "com.yourname.diettracker"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCHEME: DietTracker
+  PROJECT: DietTracker.xcodeproj
+  CONFIGURATION: ${{ github.event.inputs.configuration || 'Release' }}
+  BUNDLE_ID: ${{ github.event.inputs.bundle_id || 'com.yourname.diettracker' }}
+
+jobs:
+  # ---------- 单元测试（iOS 模拟器，不签名） ----------
+  test:
+    name: Unit tests (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate --spec project.yml --project DietTracker.xcodeproj
+          xcodebuild -list -project DietTracker.xcodeproj
+
+      - name: Lint for hardcoded style values
+        run: bash scripts/check-hardcoded-style.sh
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project DietTracker.xcodeproj \
+            -scheme DietTracker \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" 2>&1 | tee xcodebuild-test.log
+          exit ${PIPESTATUS[0]}
+        # 如果 runner 上没有 iPhone 16 模拟器，改成 iPhone 17 / iPhone 15，
+        # 或先跑 `xcrun simctl list devices available` 看有哪些机型。
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DietTracker-test-logs
+          path: build/DerivedData/Logs/Test/*.xcresult
+          if-no-files-found: ignore
+
+  # ---------- 构建（未签名 IPA） ----------
+  build:
+    name: Build unsigned .ipa
+    runs-on: ${{ github.event.inputs.runner || 'macos-15' }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          echo "DEVELOPER_DIR = $(xcode-select -p)"
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate --spec project.yml --project "$PROJECT"
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Lint for hardcoded style values
+        run: bash scripts/check-hardcoded-style.sh
+
+      - name: Build unsigned .app
+        run: |
+          set -o pipefail
+          xcodebuild clean build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            PROVISIONING_PROFILE="" \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: Package Payload into unsigned .ipa
+        run: |
+          APP="build/DerivedData/Build/Products/${CONFIGURATION}-iphoneos/DietTracker.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::App bundle not found at $APP"
+            exit 1
+          fi
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          find Payload \( -name '._*' -o -name '.DS_Store' \) -delete
+          rm -rf "Payload/DietTracker.app/_CodeSignature"
+          zip -qryX "DietTracker-unsigned.ipa" Payload
+          rm -rf Payload
+          echo "--- ipa contents (top) ---"
+          unzip -l "DietTracker-unsigned.ipa" | head -25
+          echo "--- size ---"
+          ls -lh "DietTracker-unsigned.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DietTracker-unsigned-ipa
+          path: DietTracker-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 90
+
+      # 可选：打 tag 发 Release 时把 IPA 挂上去。不需要可整段删除。
+      - name: Attach IPA to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DietTracker-unsigned.ipa
