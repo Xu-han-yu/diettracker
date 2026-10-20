@@ -1,0 +1,103 @@
+# DietTracker — XcodeGen 工程定义
+# 云端构建：xcodegen generate -> xcodebuild (CODE_SIGNING_ALLOWED=NO) -> zip Payload -> 未签名 IPA
+#
+# 修改 Bundle ID 只需改本文件两处：
+#   1) options.bundleIdPrefix
+#   2) settings.base.PRODUCT_BUNDLE_IDENTIFIER
+
+name: DietTracker
+
+options:
+  bundleIdPrefix: com.yourname
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  autoGenerateSchemes: true
+
+settings:
+  base:
+    PRODUCT_NAME: DietTracker
+    PRODUCT_BUNDLE_IDENTIFIER: com.yourname.diettracker
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SWIFT_VERSION: "5.10"
+    SWIFT_EMIT_LOC_STRINGS: "YES"
+    ENABLE_PREVIEWS: "YES"
+    CLANG_ENABLE_MODULES: "YES"
+    SWIFT_STRICT_CONCURRENCY: "minimal"
+    LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+    # ---- 未签名构建核心设置（不要改成 Automatic）----
+    CODE_SIGN_STYLE: "Manual"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGN_ENTITLEMENTS: ""
+    EXPANDED_CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    PROVISIONING_PROFILE: ""
+    # ---- 外部营养 API 占位（留空 = 关闭增强，纯本地）----
+    NUTRITION_API_BASE_URL: ""
+    NUTRITION_API_KEY: ""
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      DEBUG_INFORMATION_FORMAT: "dwarf"
+      ENABLE_TESTABILITY: "YES"
+      ONLY_ACTIVE_ARCH: "YES"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: "wholemodule"
+      DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+      ENABLE_NS_ASSERTIONS: "NO"
+      VALIDATE_PRODUCT: "NO"
+      ONLY_ACTIVE_ARCH: "NO"
+
+targets:
+  DietTracker:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: DietTracker
+        excludes:
+          - "Resources/Info.plist"
+    info:
+      path: DietTracker/Resources/Info.plist
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: "AccentColor"
+
+  DietTrackerTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: DietTrackerTests
+    dependencies:
+      - target: DietTracker
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yourname.diettracker.tests
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+
+# 显式 scheme：跑 `xcodebuild test -scheme DietTracker` 时会执行 DietTrackerTests。
+schemes:
+  DietTracker:
+    build:
+      targets:
+        DietTracker: all
+        DietTrackerTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - DietTrackerTests
